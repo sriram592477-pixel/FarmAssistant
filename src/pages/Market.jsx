@@ -2,12 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Line } from 'react-chartjs-2';
 import { ArrowUpRight, ArrowDownRight, TrendingUp, RefreshCw, AlertCircle, Loader2 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generate } from '../lib/gemini';
 
-// Register ChartJS plugins if needed (assuming they are registered globally in App.jsx usually, 
+// Register ChartJS plugins if needed (assuming they are registered globally in App.jsx usually,
 // but we rely on react-chartjs-2 which handles it if auto-registered in main.jsx)
-// We will use the VITE_GEMINI_API_KEY to fetch live market prices
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+// Live market prices are fetched through the server-side /api/gemini proxy.
 
 const Market = () => {
   const { t } = useAppContext();
@@ -15,6 +14,7 @@ const Market = () => {
   const [error, setError] = useState('');
   const [marketData, setMarketData] = useState([]);
   const [chartData, setChartData] = useState(null);
+  const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
     fetchMarketData();
@@ -23,7 +23,8 @@ const Market = () => {
   const fetchMarketData = async () => {
     setLoading(true);
     setError('');
-    
+    setIsOffline(false);
+
     // Default fallback simulation data for Kerala crops
     const fallbackData = [
       { id: 1, cropKey: 'rice', price: '₹3,200/Qtl', change: '+1.5%', trend: 'up', history: [3100, 3150, 3120, 3180, 3190, 3200] },
@@ -33,24 +34,15 @@ const Market = () => {
       { id: 5, cropKey: 'rubber', price: '₹18,500/Qtl', change: '-1.1%', trend: 'down', history: [18800, 18750, 18600, 18650, 18550, 18500] },
     ];
 
-    if (!GEMINI_API_KEY) {
-      setTimeout(() => applyData(fallbackData), 800); // simulate network delay
-      return;
-    }
-
     try {
-      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-      
-      const prompt = `Return a JSON array containing realistic current market prices in Kerala, India (in INR per Quintal) for: rice, coconut, banana, pepper, rubber. 
+      const prompt = `Return a JSON array containing realistic current market prices in Kerala, India (in INR per Quintal) for: rice, coconut, banana, pepper, rubber.
 Format exactly like this JSON structure, do not include markdown, comments, or other text:
 [
   { "id": 1, "cropKey": "rice", "price": "₹3,200/Qtl", "change": "+1.5%", "trend": "up", "history": [3100, 3150, 3120, 3180, 3190, 3200] }
 ]
 The history array must contain exactly 6 numbers representing the past 6 months. Ensure the JSON is strictly valid.`;
-      
-      const result = await model.generateContent(prompt);
-      let text = result.response.text();
+
+      let text = await generate({ model: 'gemini-2.5-flash', prompt });
       // clean json
       text = text.replace(/```json/gi, '').replace(/```/gi, '').trim();
       const data = JSON.parse(text);
@@ -58,6 +50,7 @@ The history array must contain exactly 6 numbers representing the past 6 months.
     } catch (err) {
       console.error("Failed to fetch from Gemini:", err);
       setError('Live data unavailable. Showing offline simulation.');
+      setIsOffline(true);
       applyData(fallbackData);
     }
   };
@@ -174,7 +167,7 @@ The history array must contain exactly 6 numbers representing the past 6 months.
           <div className="bg-white rounded-3xl border border-gray-100 shadow-lg shadow-gray-200/40 overflow-hidden">
             <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50/50">
               <h3 className="text-lg font-bold text-gray-800">{t('currentMarketPrices')}</h3>
-              {!GEMINI_API_KEY && (
+              {isOffline && (
                 <span className="px-3 py-1 bg-amber-100 text-amber-700 text-xs font-semibold rounded-full border border-amber-200">
                   Offline Mode
                 </span>

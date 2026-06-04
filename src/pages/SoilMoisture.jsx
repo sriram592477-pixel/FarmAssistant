@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import { Droplets, Thermometer, Wind, AlertTriangle, CheckCircle, Leaf, Loader2 } from 'lucide-react';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+import { generate } from '../lib/gemini';
 
 const LOCATIONS = [
   { id: 'tvm', name: 'Thiruvananthapuram', lat: 8.5241, lon: 76.9366 },
@@ -26,44 +24,34 @@ const SoilMoisture = () => {
   const [loading, setLoading] = useState(false);
   const [prediction, setPrediction] = useState(null);
   const [error, setError] = useState('');
+  const [isOffline, setIsOffline] = useState(false);
 
   const analyzeMoisture = async () => {
     setLoading(true);
     setError('');
     setPrediction(null);
+    setIsOffline(false);
 
+    let current;
     try {
       const loc = LOCATIONS.find(l => l.id === selectedLocation);
       const crp = CROPS.find(c => c.id === selectedCrop);
 
-      // 1. Fetch live weather data
+      // 1. Fetch live weather data (no API key required)
       const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m&timezone=auto`;
       const weatherRes = await fetch(weatherUrl);
       if (!weatherRes.ok) throw new Error('Weather data unavailable');
       const weatherData = await weatherRes.json();
-      const current = weatherData.current;
+      current = weatherData.current;
 
-      // 2. Fetch AI Prediction
-      if (!GEMINI_API_KEY) {
-        // Fallback simulation if no API key
-        setTimeout(() => {
-          setPrediction({
-            moisturePercentage: 42,
-            status: 'Moderate',
-            irrigationAdvice: 'Irrigation recommended within 24 hours to maintain optimal growth.',
-            droughtWarning: 'No severe drought risk currently detected.',
-            wateringRecommendation: 'Apply 15-20 mm of water per acre.',
-            weatherContext: { temp: current.temperature_2m, hum: current.relative_humidity_2m, rain: current.precipitation }
-          });
-          setLoading(false);
-        }, 1500);
-        return;
-      }
+      const weatherContext = {
+        temp: current.temperature_2m,
+        hum: current.relative_humidity_2m,
+        rain: current.precipitation,
+      };
 
-      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
-      
-      const prompt = `You are an expert AI agriculture assistant. 
+      // 2. Fetch AI prediction through the server-side proxy.
+      const prompt = `You are an expert AI agriculture assistant.
 Data:
 Location: ${loc.name}, Kerala
 Crop: ${crp.name}
@@ -78,16 +66,24 @@ Predict the current soil moisture percentage (0-100) and provide advice. Return 
   "wateringRecommendation": "Specific watering amount or action."
 }`;
 
-      const result = await model.generateContent(prompt);
-      let text = result.response.text();
-      text = text.replace(/```json/gi, '').replace(/```/gi, '').trim();
-      const aiData = JSON.parse(text);
-
-      setPrediction({
-        ...aiData,
-        weatherContext: { temp: current.temperature_2m, hum: current.relative_humidity_2m, rain: current.precipitation }
-      });
-
+      try {
+        let text = await generate({ model: 'gemini-2.5-flash', prompt });
+        text = text.replace(/```json/gi, '').replace(/```/gi, '').trim();
+        const aiData = JSON.parse(text);
+        setPrediction({ ...aiData, weatherContext });
+      } catch (aiErr) {
+        // AI unavailable (e.g. no server key) — fall back to a simulation using live weather.
+        console.error('AI prediction failed, using simulation:', aiErr);
+        setIsOffline(true);
+        setPrediction({
+          moisturePercentage: 42,
+          status: 'Moderate',
+          irrigationAdvice: 'Irrigation recommended within 24 hours to maintain optimal growth.',
+          droughtWarning: 'No severe drought risk currently detected.',
+          wateringRecommendation: 'Apply 15-20 mm of water per acre.',
+          weatherContext,
+        });
+      }
     } catch (err) {
       console.error(err);
       setError('Failed to analyze soil moisture. Please try again.');
@@ -143,8 +139,8 @@ Predict the current soil moisture percentage (0-100) and provide advice. Return 
               {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Droplets className="w-5 h-5" />}
               {loading ? 'Analyzing Data...' : 'Analyze Soil Moisture'}
             </button>
-            {!GEMINI_API_KEY && (
-               <p className="text-xs text-center text-amber-600 font-medium">Running in offline simulation mode.</p>
+            {isOffline && (
+               <p className="text-xs text-center text-amber-600 font-medium">AI unavailable — showing offline simulation.</p>
             )}
           </div>
         </div>

@@ -2,14 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Bot, User, Send, Sparkles, Loader2, AlertTriangle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { useAppContext } from '../context/AppContext';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
-// ---------------------------------------------------------------------------
-// Gemini client – initialised once
-// Replace the string below with your actual Gemini API key, or set it in a
-// .env file as VITE_GEMINI_API_KEY and restart the dev server.
-// ---------------------------------------------------------------------------
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+import { chat } from '../lib/gemini';
 
 // Language labels used in the system prompt
 const LANG_LABELS = {
@@ -84,22 +77,13 @@ const AIAssistant = () => {
   const [error, setError] = useState('');
   const messagesEndRef = useRef(null);
 
-  // Keep a Gemini chat session ref so conversation history is maintained
-  const chatRef = useRef(null);
+  // Conversation history sent to the proxy on each turn.
+  // Array of { role: 'user' | 'model', parts: [{ text }] }.
+  const historyRef = useRef([]);
 
-  // Re-initialise chat when language changes
+  // Reset conversation history when language changes (system prompt changes too).
   useEffect(() => {
-    if (!GEMINI_API_KEY) return;
-    try {
-      const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({
-        model: 'gemini-2.5-flash',
-        systemInstruction: buildSystemPrompt(language),
-      });
-      chatRef.current = model.startChat({ history: [] });
-    } catch (err) {
-      console.error('Gemini init error:', err);
-    }
+    historyRef.current = [];
   }, [language]);
 
   // Update welcome message when language changes (only if user hasn't started chatting)
@@ -126,33 +110,21 @@ const AIAssistant = () => {
     setError('');
 
     // -----------------------------------------------------------------------
-    // If no API key, fall back to the Offline Farming Bot
-    // -----------------------------------------------------------------------
-    if (!GEMINI_API_KEY) {
-      setTimeout(() => {
-        const fbText = getFallbackResponse(userText, language);
-        setMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'ai', text: fbText }]);
-        setIsTyping(false);
-      }, 1000);
-      return;
-    }
-
-    // -----------------------------------------------------------------------
-    // Gemini API call
+    // Gemini call via server-side proxy. Falls back to the offline bot on any
+    // error (including when the server has no API key configured).
     // -----------------------------------------------------------------------
     try {
-      // Lazy initialise chat if not yet done
-      if (!chatRef.current) {
-        const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({
-          model: 'gemini-2.5-flash',
-          systemInstruction: buildSystemPrompt(language),
-        });
-        chatRef.current = model.startChat({ history: [] });
-      }
+      const aiText = await chat({
+        model: 'gemini-2.5-flash',
+        systemInstruction: buildSystemPrompt(language),
+        history: historyRef.current,
+        message: userText,
+      });
 
-      const result = await chatRef.current.sendMessage(userText);
-      const aiText = result.response.text();
+      historyRef.current.push(
+        { role: 'user', parts: [{ text: userText }] },
+        { role: 'model', parts: [{ text: aiText }] },
+      );
 
       setMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'ai', text: aiText }]);
     } catch (err) {
@@ -184,16 +156,6 @@ const AIAssistant = () => {
           {LANG_LABELS[language]}
         </span>
       </div>
-
-      {/* API key warning banner */}
-      {!GEMINI_API_KEY && (
-        <div className="mb-4 flex items-start gap-2 bg-blue-50 border border-blue-200 text-blue-800 rounded-xl px-4 py-3 text-sm">
-          <Sparkles className="w-4 h-4 mt-0.5 flex-shrink-0" />
-          <span>
-            <strong>Offline Mode:</strong> Currently using the built-in offline farming bot. Add a Gemini API key to <code className="bg-blue-100 px-1 rounded">.env</code> to enable the real AI.
-          </span>
-        </div>
-      )}
 
       {/* Error banner */}
       {error && (
