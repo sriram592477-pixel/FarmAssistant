@@ -115,7 +115,7 @@ const AIAssistant = () => {
     // -----------------------------------------------------------------------
     try {
       const aiText = await chat({
-        model: 'google/gemini-2.5-flash',
+        model: 'meta-llama/llama-3.3-70b-instruct:free',
         systemInstruction: buildSystemPrompt(language),
         history: historyRef.current,
         message: userText,

@@ -2,10 +2,11 @@
 // The API key lives only on the server, never in the browser bundle.
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const DEFAULT_MODEL = 'google/gemini-2.5-flash';
+// Free models — work without OpenRouter credits (rate-limited).
+const DEFAULT_MODEL = 'meta-llama/llama-3.3-70b-instruct:free';
 const FALLBACK_MODELS = [
-  'google/gemini-2.5-flash-lite',
-  'meta-llama/llama-3.3-70b-instruct',
+  'google/gemini-2.0-flash-exp:free',
+  'deepseek/deepseek-chat-v3-0324:free',
 ];
 
 function isQuotaError(status, text) {
@@ -13,13 +14,15 @@ function isQuotaError(status, text) {
   return status === 429 || msg.includes('quota') || msg.includes('rate limit') || msg.includes('exhausted');
 }
 
-// Normalize legacy Google SDK model IDs (e.g. "gemini-2.5-flash") to the
-// namespaced form OpenRouter expects (e.g. "google/gemini-2.5-flash").
+// Normalize model IDs. Legacy Google SDK IDs ("gemini-2.5-flash") and paid
+// Gemini IDs are remapped to the free default so the app works without
+// OpenRouter credits. Pass any other namespaced id ("vendor/model") through.
 function normalizeModel(name) {
   if (!name) return DEFAULT_MODEL;
+  // Paid Gemini models return 402 without credits — fall back to free default.
+  if (name.includes('gemini') && !name.endsWith(':free')) return DEFAULT_MODEL;
   if (name.includes('/')) return name;
-  if (name.startsWith('gemini')) return `google/${name}`;
-  return name;
+  return DEFAULT_MODEL;
 }
 
 // Convert Gemini-style history ({ role: 'user'|'model', parts: [{text}] })

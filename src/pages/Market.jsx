@@ -42,7 +42,7 @@ Format exactly like this JSON structure, do not include markdown, comments, or o
 ]
 The history array must contain exactly 6 numbers representing the past 6 months. Ensure the JSON is strictly valid.`;
 
-      let text = await generate({ model: 'google/gemini-2.5-flash', prompt });
+      let text = await generate({ model: 'meta-llama/llama-3.3-70b-instruct:free', prompt });
       // clean json
       text = text.replace(/```json/gi, '').replace(/```/gi, '').trim();
       const data = JSON.parse(text);
