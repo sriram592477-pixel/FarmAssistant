@@ -5,8 +5,8 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 // Free models — work without OpenRouter credits (rate-limited).
 const DEFAULT_MODEL = 'meta-llama/llama-3.3-70b-instruct:free';
 const FALLBACK_MODELS = [
-  'google/gemini-2.0-flash-exp:free',
-  'deepseek/deepseek-chat-v3-0324:free',
+  'qwen/qwen3-next-80b-a3b-instruct:free',
+  'openai/gpt-oss-120b:free',
 ];
 
 function isQuotaError(status, text) {
@@ -86,11 +86,15 @@ export default async function handler(req, res) {
 
       const errText = await upstream.text();
       const isLast = modelName === modelsToTry[modelsToTry.length - 1];
-      if (isQuotaError(upstream.status, errText) && !isLast) {
-        console.warn(`Model ${modelName} hit quota/rate limit, trying fallback...`);
+      // Retryable: rate limit (429), missing/invalid model (404), or no
+      // credits for a paid model (402). Try the next free model instead.
+      const retryable = isQuotaError(upstream.status, errText) ||
+        upstream.status === 404 || upstream.status === 402;
+      console.error(`OpenRouter error (${upstream.status}) for ${modelName}: ${errText}`);
+      if (retryable && !isLast) {
+        console.warn(`Model ${modelName} failed (${upstream.status}), trying fallback...`);
         continue;
       }
-      console.error(`OpenRouter error (${upstream.status}) for ${modelName}: ${errText}`);
       return res.status(502).json({ error: 'Upstream OpenRouter request failed' });
     }
   } catch (err) {
