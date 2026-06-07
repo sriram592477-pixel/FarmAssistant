@@ -13,6 +13,15 @@ function isQuotaError(status, text) {
   return status === 429 || msg.includes('quota') || msg.includes('rate limit') || msg.includes('exhausted');
 }
 
+// Normalize legacy Google SDK model IDs (e.g. "gemini-2.5-flash") to the
+// namespaced form OpenRouter expects (e.g. "google/gemini-2.5-flash").
+function normalizeModel(name) {
+  if (!name) return DEFAULT_MODEL;
+  if (name.includes('/')) return name;
+  if (name.startsWith('gemini')) return `google/${name}`;
+  return name;
+}
+
 // Convert Gemini-style history ({ role: 'user'|'model', parts: [{text}] })
 // into OpenAI-style messages ({ role: 'user'|'assistant', content }).
 function toMessages({ systemInstruction, history, message, prompt }) {
@@ -52,7 +61,7 @@ export default async function handler(req, res) {
   }
 
   const messages = toMessages({ systemInstruction, history, message, prompt });
-  const requestedModel = model || DEFAULT_MODEL;
+  const requestedModel = normalizeModel(model);
   const modelsToTry = [requestedModel, ...FALLBACK_MODELS].filter((v, i, a) => a.indexOf(v) === i);
 
   try {

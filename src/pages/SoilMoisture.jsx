@@ -67,7 +67,7 @@ Predict the current soil moisture percentage (0-100) and provide advice. Return 
 }`;
 
       try {
-        let text = await generate({ model: 'gemini-2.5-flash', prompt });
+        let text = await generate({ model: 'google/gemini-2.5-flash', prompt });
         text = text.replace(/```json/gi, '').replace(/```/gi, '').trim();
         const aiData = JSON.parse(text);
         setPrediction({ ...aiData, weatherContext });
