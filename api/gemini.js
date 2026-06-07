@@ -1,15 +1,37 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+// Server-side proxy that talks to OpenRouter (OpenAI-compatible API).
+// The API key lives only on the server, never in the browser bundle.
 
-const DEFAULT_MODEL = 'gemini-2.5-flash';
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const DEFAULT_MODEL = 'google/gemini-2.5-flash';
 const FALLBACK_MODELS = [
-  'gemini-2.5-flash-lite',
-  'gemini-3.5-flash',
-  'gemini-flash-latest'
+  'google/gemini-2.5-flash-lite',
+  'meta-llama/llama-3.3-70b-instruct',
 ];
 
-function isQuotaError(err) {
-  const msg = (err?.message || '').toLowerCase();
-  return msg.includes('quota') || msg.includes('429') || msg.includes('rate limit') || msg.includes('exhausted');
+function isQuotaError(status, text) {
+  const msg = (text || '').toLowerCase();
+  return status === 429 || msg.includes('quota') || msg.includes('rate limit') || msg.includes('exhausted');
+}
+
+// Convert Gemini-style history ({ role: 'user'|'model', parts: [{text}] })
+// into OpenAI-style messages ({ role: 'user'|'assistant', content }).
+function toMessages({ systemInstruction, history, message, prompt }) {
+  const messages = [];
+  if (systemInstruction) {
+    messages.push({ role: 'system', content: systemInstruction });
+  }
+  if (Array.isArray(history)) {
+    for (const turn of history) {
+      const text = (turn?.parts || []).map((p) => p?.text || '').join('');
+      messages.push({ role: turn.role === 'model' ? 'assistant' : 'user', content: text });
+    }
+  }
+  if (typeof message === 'string') {
+    messages.push({ role: 'user', content: message });
+  } else if (typeof prompt === 'string') {
+    messages.push({ role: 'user', content: prompt });
+  }
+  return messages;
 }
 
 export default async function handler(req, res) {
@@ -18,64 +40,49 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    return res.status(503).json({ offline: true, error: 'GEMINI_API_KEY not configured' });
+    return res.status(503).json({ offline: true, error: 'OPENROUTER_API_KEY not configured' });
   }
 
   const { model, prompt, systemInstruction, history, message } = req.body || {};
 
-  try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const requestedModel = model || DEFAULT_MODEL;
-    const modelsToTry = [requestedModel, ...FALLBACK_MODELS].filter((v, i, a) => a.indexOf(v) === i);
-
-    // Chat mode: stateless turn driven by client-supplied history + a new message.
-    if (typeof message === 'string') {
-      let lastErr = null;
-      for (const modelName of modelsToTry) {
-        try {
-          const chatModel = genAI.getGenerativeModel({
-            model: modelName,
-            ...(systemInstruction ? { systemInstruction } : {}),
-          });
-          const chat = chatModel.startChat({ history: Array.isArray(history) ? history : [] });
-          const result = await chat.sendMessage(message);
-          return res.status(200).json({ text: result.response.text() });
-        } catch (err) {
-          if (isQuotaError(err) && modelName !== modelsToTry[modelsToTry.length - 1]) {
-            console.warn(`Model ${modelName} hit quota limit, trying fallback...`);
-            lastErr = err;
-            continue;
-          }
-          throw err;
-        }
-      }
-    }
-
-    // One-shot mode.
-    if (typeof prompt === 'string') {
-      let lastErr = null;
-      for (const modelName of modelsToTry) {
-        try {
-          const oneShot = genAI.getGenerativeModel({ model: modelName });
-          const result = await oneShot.generateContent(prompt);
-          return res.status(200).json({ text: result.response.text() });
-        } catch (err) {
-          if (isQuotaError(err) && modelName !== modelsToTry[modelsToTry.length - 1]) {
-            console.warn(`Model ${modelName} hit quota limit, trying fallback...`);
-            lastErr = err;
-            continue;
-          }
-          throw err;
-        }
-      }
-    }
-
+  if (typeof message !== 'string' && typeof prompt !== 'string') {
     return res.status(400).json({ error: 'Provide either "message" (chat) or "prompt" (one-shot).' });
+  }
+
+  const messages = toMessages({ systemInstruction, history, message, prompt });
+  const requestedModel = model || DEFAULT_MODEL;
+  const modelsToTry = [requestedModel, ...FALLBACK_MODELS].filter((v, i, a) => a.indexOf(v) === i);
+
+  try {
+    for (const modelName of modelsToTry) {
+      const upstream = await fetch(OPENROUTER_URL, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ model: modelName, messages }),
+      });
+
+      if (upstream.ok) {
+        const data = await upstream.json();
+        const text = data?.choices?.[0]?.message?.content ?? '';
+        return res.status(200).json({ text });
+      }
+
+      const errText = await upstream.text();
+      const isLast = modelName === modelsToTry[modelsToTry.length - 1];
+      if (isQuotaError(upstream.status, errText) && !isLast) {
+        console.warn(`Model ${modelName} hit quota/rate limit, trying fallback...`);
+        continue;
+      }
+      console.error(`OpenRouter error (${upstream.status}) for ${modelName}: ${errText}`);
+      return res.status(502).json({ error: 'Upstream OpenRouter request failed' });
+    }
   } catch (err) {
-    console.error('Gemini proxy error:', err);
-    return res.status(502).json({ error: 'Upstream Gemini request failed' });
+    console.error('OpenRouter proxy error:', err);
+    return res.status(502).json({ error: 'Upstream OpenRouter request failed' });
   }
 }
-
