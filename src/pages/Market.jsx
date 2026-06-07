@@ -48,7 +48,7 @@ The history array must contain exactly 6 numbers representing the past 6 months.
       const data = JSON.parse(text);
       applyData(data);
     } catch (err) {
-      console.error("Failed to fetch from Gemini:", err);
+      console.error("Failed to fetch from AI service:", err);
       setError('Live data unavailable. Showing offline simulation.');
       setIsOffline(true);
       applyData(fallbackData);

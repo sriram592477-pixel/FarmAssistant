@@ -12,7 +12,7 @@ const LANG_LABELS = {
   ml: 'Malayalam',
 };
 
-// Build a farming-focused system prompt that instructs Gemini to answer in the
+// Build a farming-focused system prompt that instructs the AI to answer in the
 // selected language.
 const buildSystemPrompt = (langCode) => {
   const lang = LANG_LABELS[langCode] || 'English';
@@ -110,8 +110,8 @@ const AIAssistant = () => {
     setError('');
 
     // -----------------------------------------------------------------------
-    // Gemini call via server-side proxy. Falls back to the offline bot on any
-    // error (including when the server has no API key configured).
+    // AI call via the server-side OpenRouter proxy. Falls back to the offline
+    // bot on any error (including when the server has no API key configured).
     // -----------------------------------------------------------------------
     try {
       const aiText = await chat({
@@ -128,8 +128,8 @@ const AIAssistant = () => {
 
       setMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'ai', text: aiText }]);
     } catch (err) {
-      console.error('Gemini API error:', err);
-      setError('Gemini API connection issue. Using offline bot...');
+      console.error('AI API error:', err);
+      setError('AI service unavailable. Using offline bot...');
       const fbText = getFallbackResponse(userText, language);
       setMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'ai', text: fbText }]);
     } finally {

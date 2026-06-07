@@ -97,7 +97,7 @@ Predict the current soil moisture percentage (0-100) and provide advice. Return 
       
       <div className="text-center space-y-2 mb-8">
         <h2 className="text-3xl font-bold text-gray-800">AI Soil Moisture Predictor</h2>
-        <p className="text-gray-500 max-w-2xl mx-auto">Predict soil moisture levels and get tailored irrigation advice without physical hardware sensors, powered by Open-Meteo and Gemini AI.</p>
+        <p className="text-gray-500 max-w-2xl mx-auto">Predict soil moisture levels and get tailored irrigation advice without physical hardware sensors, powered by Open-Meteo and AI.</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
